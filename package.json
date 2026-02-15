@@ -1,0 +1,30 @@
+{
+  "name": "lancall",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "selfsigned": "^5.5.0",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "electron": "^40.4.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/apertureprioritye-art/lancall.git"
+  },
+  "bugs": {
+    "url": "https://github.com/apertureprioritye-art/lancall/issues"
+  },
+  "homepage": "https://github.com/apertureprioritye-art/lancall#readme"
+}

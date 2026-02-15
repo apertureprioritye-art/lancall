@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>HexaMEET By HexaFIBRE</title>
+<script src="/socket.io/socket.io.js"></script>
+<link rel='stylesheet' href='https://fonts.googleapis.com/css2?family=Kanit&amp;display=swap'>
+</head>
+<style>
+body{
+  margin:0;
+  background:#111;
+  color:white;
+  font-family: kanit;
+  display:flex;
+  flex-direction:column;
+  height:100vh;
+}
+
+#joinScreen{
+  margin:auto;
+  text-align:center;
+}
+
+input{
+  padding:10px;
+  margin:5px;
+  border:none;
+  border-radius:5px;
+}
+
+button{
+  padding:10px 15px;
+  border:none;
+  border-radius:5px;
+  cursor:pointer;
+}
+
+#videos{
+  flex:1;
+  display:none;
+  flex-wrap:wrap;
+  justify-content:center;
+  align-items:center;
+  gap:10px;
+  padding:10px;
+}
+
+.videoBox{
+  position:relative;
+  width:45%;
+  max-width:500px;
+  aspect-ratio:16/9;
+  background:black;
+  border-radius:10px;
+  overflow:hidden;
+}
+
+video{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+.nameTag{
+  position:absolute;
+  bottom:5px;
+  left:5px;
+  background:rgba(0,0,0,0.5);
+  padding:3px 8px;
+  border-radius:5px;
+  font-size:14px;
+}
+
+#controls{
+  display:none;
+  padding:10px;
+  background:#222;
+  text-align:center;
+}
+
+#controls button{
+  margin:5px;
+}
+
+#leaveBtn{
+  background:red;
+  color:white;
+}
+</style>
+</head>
+<body>
+
+<div id="joinScreen">
+  <h2>HexaMEET By HexaFIBRE</h2>
+  <input id="roomId" placeholder="Room ID"><br>
+  <input id="username" placeholder="Your Name"><br>
+  <button onclick="joinRoom()" style="font-family: kanit; background-color: #ff6e00; color: white; border-radius: 25px;">JOIN</button>
+</div>
+
+<div id="videos"></div>
+
+<div id="controls">
+  <button id="micBtn">Mic On</button>
+  <button id="videoBtn">Camera On</button>
+  <button id="switchBtn">Switch Camera</button>
+  <button id="leaveBtn">Leave Call</button>
+</div>
+
+<script>
+let socket;
+
+let localStream;
+let peers = {};
+let myName;
+let currentRoom;
+let currentFacing = "user";
+
+// ================= JOIN =================
+async function joinRoom(){
+
+  socket = io();
+
+  const roomId = document.getElementById("roomId").value;
+  myName = document.getElementById("username").value;
+
+  if(!roomId || !myName) return alert("Enter room and name");
+
+  currentRoom = roomId;
+
+  try{
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+
+localStream.getVideoTracks()
+[0].enabled = false;
+
+  }catch(err){
+    alert("Camera / Mic error");
+    console.error(err);
+    return;
+  }
+
+  document.getElementById("joinScreen").style.display="none";
+  document.getElementById("videos").style.display="flex";
+  document.getElementById("controls").style.display="block";
+
+  addVideo(socket.id, localStream, myName);
+
+  socket.emit("join-room",{ roomId, username:myName });
+
+  socket.on("user-joined", ({ id, name })=>{
+    createPeer(id, name, true);
+  });
+
+  socket.on("signal", async ({ from, name, data })=>{
+
+    if(!peers[from]) createPeer(from, name, false);
+
+    if(data.type==="offer"){
+      await peers[from].setRemoteDescription(new RTCSessionDescription(data));
+      const answer = await peers[from].createAnswer();
+      await peers[from].setLocalDescription(answer);
+      socket.emit("signal",{ to:from, data:answer });
+    }
+
+    if(data.type==="answer"){
+      if(peers[from].signalingState!=="stable"){
+        await peers[from].setRemoteDescription(new RTCSessionDescription(data));
+      }
+    }
+
+    if(data.candidate){
+      await peers[from].addIceCandidate(new RTCIceCandidate(data));
+    }
+
+  });
+
+  socket.on("user-left", id=>{
+    if(peers[id]){
+      peers[id].close();
+      delete peers[id];
+    }
+    const el=document.getElementById("video-"+id);
+    if(el) el.remove();
+  });
+}
+
+// ================= PEER =================
+function createPeer(id,name,initiator){
+
+  const pc = new RTCPeerConnection({
+    iceServers:[{urls:"stun:stun.l.google.com:19302"}]
+  });
+
+  peers[id]=pc;
+
+  localStream.getTracks().forEach(track=>{
+    pc.addTrack(track,localStream);
+  });
+
+  pc.ontrack = e=>{
+    addVideo(id,e.streams[0],name);
+  };
+
+  pc.onicecandidate = e=>{
+    if(e.candidate){
+      socket.emit("signal",{ to:id, data:e.candidate });
+    }
+  };
+
+  if(initiator){
+    pc.createOffer().then(offer=>{
+      pc.setLocalDescription(offer);
+      socket.emit("signal",{ to:id, data:offer });
+    });
+  }
+}
+
+// ================= VIDEO UI =================
+function addVideo(id,stream,name){
+
+  if(document.getElementById("video-"+id)) return;
+
+  const box=document.createElement("div");
+  box.className="videoBox";
+  box.id="video-"+id;
+
+  const video=document.createElement("video");
+  video.autoplay=true;
+  video.playsInline=true;
+  video.srcObject=stream;
+
+  if(id === socket.id){
+    video.muted = true
+    video.volume = 0;
+  }
+
+  const tag=document.createElement("div");
+  tag.className="nameTag";
+  tag.innerText=name;
+
+  box.appendChild(video);
+  box.appendChild(tag);
+  document.getElementById("videos").appendChild(box);
+}
+
+// ================= MIC =================
+micBtn.onclick=()=>{
+  const track=localStream.getAudioTracks()[0];
+  track.enabled=!track.enabled;
+  micBtn.innerText=track.enabled?"Mic On":"Mic Off";
+};
+
+// ================= CAMERA =================
+videoBtn.onclick=()=>{
+  const videoTrack=localStream.getVideoTracks()[0];
+
+  videoTrack.enabled=track.enabled = !
+  videoTrack.enabled,
+
+  videoBtn.innerText=videoTrack.enabled
+  ?"Camera On"
+  :"Camera Off";
+};
+
+// ================= SWITCH CAMERA =================
+videoBtn.onclick = async () => {
+
+  const videoTrack = localStream.getVideoTracks()[0];
+
+  // 🔴 ถ้ายังไม่มี video track เลย = เปิดครั้งแรก
+  if(!videoTrack){
+
+    try{
+      const camStream = await navigator.mediaDevices.getUserMedia({
+        video: true
+      });
+
+      const newVideoTrack = camStream.getVideoTracks()[0];
+      localStream.addTrack(newVideoTrack);
+
+      // ส่งให้ peer
+      Object.values(peers).forEach(pc=>{
+        pc.addTrack(newVideoTrack, localStream);
+      });
+
+      document.querySelector("#video-"+socket.id+" video").srcObject = localStream;
+
+      videoBtn.innerText = "Camera On";
+
+    }catch(err){
+      alert("Cannot open camera");
+      console.error(err);
+    }
+
+  }
+  else{
+    // 🔵 ถ้ามีแล้ว = เปิด/ปิดปกติ
+    videoTrack.enabled = !videoTrack.enabled;
+    videoBtn.innerText = videoTrack.enabled ? "Camera On" : "Camera Off";
+  }
+};
+
+// ================= LEAVE =================
+leaveBtn.onclick=()=>{
+
+  if(localStream){
+    localStream.getTracks().forEach(t=>t.stop());
+  }
+
+  Object.values(peers).forEach(pc=>pc.close());
+  peers={};
+
+  document.getElementById("videos").innerHTML="";
+  document.getElementById("videos").style.display="none";
+  document.getElementById("controls").style.display="none";
+  document.getElementById("joinScreen").style.display="block";
+
+  socket.disconnect();
+};
+</script>
+
+</body>
+</html
